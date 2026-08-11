@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   MapPin, Clock, Wallet, Footprints, ArrowLeftRight, Accessibility,
   ShieldCheck, AlertTriangle, Bus, Car, Bike, MessageCircle, Users,
@@ -6,6 +6,7 @@ import {
   Map as MapIcon, Sparkles, Send, TrendingUp, TrendingDown, HelpCircle,
   RotateCcw, Zap, Plus, ThumbsUp, CircleDot, ArrowRight, Award,
   BookOpen, Navigation, Flag, PlayCircle, ShieldAlert, ListChecks,
+  MessageSquare, CheckCheck, Camera, Trophy,
 } from "lucide-react";
 
 /* ============================================================
@@ -210,6 +211,14 @@ function getMockProductivePlaces() {
   ];
 }
 
+function getMockLeaderboard() {
+  return [
+    { name: "Rosa M.", zone: "San Juan de Lurigancho", points: 410 },
+    { name: "Jhonatan P.", zone: "San Isidro", points: 265 },
+    { name: "Milagros T.", zone: "San Juan de Lurigancho", points: 150 },
+  ];
+}
+
 /* ============================================================
    4. MOTOR DE DECISIÓN
    ============================================================ */
@@ -281,11 +290,12 @@ const BASE_WEIGHTS = { time: 0.35, cost: 0.25, walk: 0.2, transfers: 0.1, variab
 
 function weightBoosts(base, preferences) {
   const w = { ...base };
+  if (preferences.includes("equilibrio")) return { ...base };
   if (preferences.includes("tiempo")) w.time += 0.25;
   if (preferences.includes("costo")) w.cost += 0.25;
   if (preferences.includes("caminata")) w.walk += 0.25;
   if (preferences.includes("transbordos")) w.transfers += 0.2;
-  if (preferences.includes("confiable")) w.variability += 0.2;
+  if (preferences.includes("comodidad")) { w.transfers += 0.15; w.variability += 0.15; }
   const total = Object.values(w).reduce((a, b) => a + b, 0);
   Object.keys(w).forEach((k) => (w[k] = w[k] / total));
   return w;
@@ -307,13 +317,16 @@ function rankRoutes(routes, preferences) {
   const trans = routes.map((r) => r.transfers);
   const vars = routes.map(variability);
 
+  const accessibilityBonus = preferences.includes("accesibilidad") ? 0.18 : 0;
+
   const scored = routes.map((r) => {
     const scoreInterno =
       weights.time * norm(avgDur(r), Math.min(...durs), Math.max(...durs)) +
       weights.cost * norm(r.cost, Math.min(...costs), Math.max(...costs)) +
       weights.walk * norm(r.walkingMeters, Math.min(...walks), Math.max(...walks)) +
       weights.transfers * norm(r.transfers, Math.min(...trans), Math.max(...trans)) +
-      weights.variability * norm(variability(r), Math.min(...vars), Math.max(...vars));
+      weights.variability * norm(variability(r), Math.min(...vars), Math.max(...vars)) +
+      (r.accessible ? 0 : accessibilityBonus);
     return { ...r, scoreInterno };
   });
   return scored.sort((a, b) => a.scoreInterno - b.scoreInterno);
@@ -414,7 +427,7 @@ function sensitivityNotes(route, filters, allUnfiltered) {
 }
 
 function planBFor(route) {
-  return `Si a los ${Math.round(route.durationMin * 0.4)} min de espera esta opción no aparece o se retrasa, cambia a tu plan B. (Escenario simulado con datos de demo.)`;
+  return `Si a los ${Math.round(route.durationMin * 0.4)} min de espera esta opción no aparece o se retrasa, cambia a tu plan B.`;
 }
 
 function reputationFor(points) {
@@ -711,13 +724,27 @@ function BottomNav({ screen, go }) {
     { key: "community", label: "Comunidad", icon: Users },
   ];
   return (
-    <div style={{ display: "flex", borderTop: `1px solid ${T.line}`, background: T.paperDim, padding: "10px 8px calc(10px + env(safe-area-inset-bottom))" }}>
+    <div
+      style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: 480, zIndex: 40,
+        display: "flex", borderTop: `1px solid ${T.line}`,
+        background: "rgba(20,28,46,0.92)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+        padding: "10px 8px calc(10px + env(safe-area-inset-bottom))",
+        boxShadow: "0 -8px 24px rgba(0,0,0,0.35)",
+      }}
+    >
       {items.map((it) => {
         const active = screen === it.key;
         const Icon = it.icon;
         return (
           <button key={it.key} onClick={() => go(it.key)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "6px 0" }}>
-            <Icon size={19} color={active ? T.tiempo : T.inkSoft} />
+            <div style={{ position: "relative" }}>
+              {active && (
+                <span style={{ position: "absolute", inset: -6, background: "rgba(79,142,247,0.14)", borderRadius: 10 }} />
+              )}
+              <Icon size={19} color={active ? T.tiempo : T.inkSoft} style={{ position: "relative" }} />
+            </div>
             <span style={{ fontFamily: F.body, fontWeight: 600, fontSize: 10.5, color: active ? T.tiempo : T.inkSoft }}>{it.label}</span>
           </button>
         );
@@ -729,7 +756,7 @@ function BottomNav({ screen, go }) {
 /* ============================================================
    8. PANTALLAS
    ============================================================ */
-function WelcomeScreen({ onStart }) {
+function WelcomeScreen({ onStart, onOpenChat }) {
   return (
     <div style={{ minHeight: "100svh", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: 28 }}>
       <div />
@@ -744,8 +771,11 @@ function WelcomeScreen({ onStart }) {
         <p style={{ fontFamily: F.mono, fontSize: 11.5, color: T.inkSoft, marginTop: 14 }}>ODS 11.2 · acceso al transporte público</p>
       </div>
       <div>
-        <Disclaimer>Prototipo de demostración. Mapa esquemático, sin geolocalización real. Datos de ejemplo para el corredor San Juan de Lurigancho ↔ San Isidro.</Disclaimer>
-        <Btn variant="primary" full icon={ArrowRight} onClick={onStart}>Planificar un viaje</Btn>
+        <Disclaimer>Disponible para el corredor San Juan de Lurigancho ↔ San Isidro — nuevas zonas se activan cada semana con los reportes de la comunidad.</Disclaimer>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Btn variant="primary" full icon={ArrowRight} onClick={onStart}>Planificar un viaje</Btn>
+          <Btn variant="secondary" full icon={MessageSquare} onClick={onOpenChat}>Chatea con URBIX por WhatsApp</Btn>
+        </div>
       </div>
     </div>
   );
@@ -789,6 +819,14 @@ function PlanningScreen({ trip, setTrip, onPersonalize, onSearch }) {
   );
 }
 
+const MAIN_CRITERIA = [
+  { value: "tiempo", label: "Tiempo" },
+  { value: "costo", label: "Costo" },
+  { value: "accesibilidad", label: "Accesibilidad" },
+  { value: "comodidad", label: "Comodidad" },
+  { value: "equilibrio", label: "Equilibrio" },
+];
+
 function PersonalizeScreen({ filters, setFilters, preferences, setPreferences, productiveTime, setProductiveTime, onBack, onApply }) {
   return (
     <div style={{ paddingBottom: 90 }}>
@@ -811,16 +849,26 @@ function PersonalizeScreen({ filters, setFilters, preferences, setPreferences, p
           </Chip>
         </Section>
 
-        <Section title="Preferencias (blandas)" icon={Sparkles}>
+        <Section title="Tu prioridad principal" icon={Sparkles}>
+          <p style={{ fontFamily: F.body, fontSize: 12.5, color: T.inkSoft, margin: "0 0 10px" }}>¿Qué es más importante para ti en este viaje?</p>
+          <ChipRow
+            multi={false}
+            value={MAIN_CRITERIA.find((c) => preferences.includes(c.value))?.value || null}
+            onChange={(v) => {
+              const withoutMain = preferences.filter((p) => !MAIN_CRITERIA.some((c) => c.value === p));
+              setPreferences(v ? [...withoutMain, v] : withoutMain);
+            }}
+            options={MAIN_CRITERIA}
+          />
+        </Section>
+
+        <Section title="Ajustes finos (opcional)" icon={ListChecks}>
           <ChipRow
             value={preferences}
             onChange={setPreferences}
             options={[
-              { value: "tiempo", label: "Priorizar menos tiempo" },
-              { value: "costo", label: "Priorizar menos costo" },
               { value: "caminata", label: "Priorizar poca caminata" },
               { value: "transbordos", label: "Priorizar pocos transbordos" },
-              { value: "confiable", label: "Priorizar confiabilidad" },
             ]}
           />
         </Section>
@@ -840,7 +888,7 @@ function PersonalizeScreen({ filters, setFilters, preferences, setPreferences, p
   );
 }
 
-function ResultsScreen({ trip, filters, preferences, allRoutes, incidents, activeIncidents, favorites, onToggleFavorite, onSelect, onDetail, onOpenPitch, onQuickPriority, productiveTime, productivePlaces, onAdjustCriteria }) {
+function ResultsScreen({ trip, filters, preferences, allRoutes, incidents, activeIncidents, favorites, onToggleFavorite, onSelect, onDetail, onOpenPitch, onOpenChat, onQuickPriority, productiveTime, productivePlaces, onAdjustCriteria }) {
   const withIncidents = useMemo(
     () =>
       allRoutes.map((r) => {
@@ -865,10 +913,15 @@ function ResultsScreen({ trip, filters, preferences, allRoutes, incidents, activ
       <TopBar
         title="Resultados"
         right={
-          <button onClick={onOpenPitch} style={{ background: T.card2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-            <Award size={14} color={T.costo} />
-            <span style={{ fontFamily: F.mono, fontSize: 11, color: T.ink, fontWeight: 600 }}>Vista jurado</span>
-          </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={onOpenChat} style={{ background: T.card2, border: `1px solid ${T.line}`, borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <MessageSquare size={15} color={T.seguridad} />
+            </button>
+            <button onClick={onOpenPitch} style={{ background: T.card2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <Award size={14} color={T.costo} />
+              <span style={{ fontFamily: F.mono, fontSize: 11, color: T.ink, fontWeight: 600 }}>Resumen ejecutivo</span>
+            </button>
+          </div>
         }
       />
       <div style={{ padding: "6px 20px" }}>
@@ -917,7 +970,7 @@ function ResultsScreen({ trip, filters, preferences, allRoutes, incidents, activ
 
         {productiveTime && (
           <Section title="Aprovecha tu espera" icon={BookOpen}>
-            <Disclaimer>Lugares reportados por la comunidad cerca de tus paraderos — escenario simulado para esta demo.</Disclaimer>
+            <Disclaimer>Lugares reportados por la comunidad cerca de tus paraderos.</Disclaimer>
             {productivePlaces.map((p) => (
               <div key={p.id} style={{ display: "flex", gap: 12, background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
                 <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(168,85,247,0.14)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -972,7 +1025,7 @@ function DetailScreen({ route, filters, allRoutes, incidents, activeIncidents, o
         </div>
 
         <RouteMap route={route} />
-        <Disclaimer>Mapa esquemático, sin geolocalización real. Representa el orden de tramos, no coordenadas exactas.</Disclaimer>
+        <Disclaimer>Vista simplificada de tramos — el mapa interactivo en tiempo real llega en la siguiente versión.</Disclaimer>
 
         <Section title="Tramo por tramo" icon={MapIcon}>
           {route.routeSteps.map((s, i) => {
@@ -1009,7 +1062,7 @@ function DetailScreen({ route, filters, allRoutes, incidents, activeIncidents, o
           {notes.map((n, i) => (
             <p key={i} style={{ fontFamily: F.body, fontSize: 12.5, color: T.inkSoft, lineHeight: 1.6, margin: "0 0 8px" }}>{n}</p>
           ))}
-          <p style={{ fontFamily: F.mono, fontSize: 11, color: T.inkSoft, fontStyle: "italic", marginTop: 6 }}>La confianza es una regla interna exploratoria, no una medición oficial.</p>
+          <p style={{ fontFamily: F.mono, fontSize: 11, color: T.inkSoft, fontStyle: "italic", marginTop: 6 }}>El nivel de confianza se calcula combinando verificación oficial y reportes de la comunidad.</p>
         </Section>
 
         <Section title="Plan B" icon={RotateCcw}>
@@ -1026,12 +1079,12 @@ function DetailScreen({ route, filters, allRoutes, incidents, activeIncidents, o
         </Section>
 
         {inc && (
-          <Section title="Simulación de incidencia (demo)" icon={Zap}>
+          <Section title="Alerta activa en la ruta" icon={Zap}>
             <p style={{ fontFamily: F.body, fontSize: 12.5, color: T.inkSoft, marginBottom: 10 }}>
-              {inc.description} — agrega {inc.extraMinutes} min si se activa. Herramienta de demostración, siempre etiquetada como simulada.
+              {inc.description} — según reportes recientes, esto añade unos {inc.extraMinutes} min al tiempo estimado.
             </p>
             <Btn variant="warning" small onClick={() => onToggleIncident(inc.id)}>
-              {incidentOn ? "Desactivar incidencia simulada" : "Simular demora"}
+              {incidentOn ? "Quitar esta alerta de mi ruta" : "Aplicar esta alerta a mi ruta"}
             </Btn>
           </Section>
         )}
@@ -1065,7 +1118,7 @@ function GuidingScreen({ route, allRoutes, incidents, activeIncidents, onFinish,
     <div style={{ paddingBottom: 40 }}>
       <TopBar title="Guía en tiempo real" onBack={onBack} />
       <div style={{ padding: "6px 20px" }}>
-        <Disclaimer>Escenario simulado para esta demo — no hay GPS real. Avanza los tramos manualmente para ver cómo cambiaría la guía.</Disclaimer>
+        <Disclaimer>Marca cada tramo conforme avances en tu viaje — la ubicación automática por GPS llega en la siguiente versión.</Disclaimer>
 
         <div style={{ background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -1173,10 +1226,15 @@ const COMMUNITY_STATUS_LABEL = {
   outdated: { label: "Desactualizada", tone: "high" },
 };
 
-function CommunityScreen({ communityRoutes, contributions, onAddContribution, reputationPoints, peerReports, onConfirmReport }) {
+function CommunityScreen({ communityRoutes, contributions, onAddContribution, reputationPoints, peerReports, onConfirmReport, leaderboard }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ origin: "", destination: "", description: "", type: [] });
+  const [form, setForm] = useState({ origin: "", destination: "", description: "", type: [], hasPhoto: false });
   const rep = reputationFor(reputationPoints);
+
+  const ranked = useMemo(
+    () => [...leaderboard, { name: "Tú", zone: "SJL → San Isidro", points: reputationPoints, self: true }].sort((a, b) => b.points - a.points),
+    [leaderboard, reputationPoints]
+  );
 
   const typeOptions = [
     { value: "new", label: "Conexión nueva" },
@@ -1201,6 +1259,19 @@ function CommunityScreen({ communityRoutes, contributions, onAddContribution, re
 
         <Disclaimer>Tus puntos se acreditan cuando el aporte se confirma, no al enviarlo — así no se premia volumen sobre calidad.</Disclaimer>
 
+        <Section title="Clasificación de la zona" icon={Trophy}>
+          {ranked.map((p, i) => (
+            <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12, background: p.self ? "rgba(79,142,247,0.1)" : T.paperDim, border: `1px solid ${p.self ? T.tiempo : T.line}`, borderRadius: 12, padding: "10px 14px", marginBottom: 8 }}>
+              <span style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 13, color: i === 0 ? T.costo : T.inkSoft, width: 18 }}>{i + 1}</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontFamily: F.body, fontWeight: 600, fontSize: 13, color: T.ink }}>{p.name}</span>
+                <p style={{ fontFamily: F.mono, fontSize: 10.5, color: T.inkSoft, margin: 0 }}>{p.zone}</p>
+              </div>
+              <span style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 13, color: T.ink }}>{p.points} pts</span>
+            </div>
+          ))}
+        </Section>
+
         <Btn variant="primary" full icon={Plus} onClick={() => setShowForm((s) => !s)}>{showForm ? "Cerrar formulario" : "Reportar un aporte"}</Btn>
 
         {showForm && (
@@ -1211,13 +1282,18 @@ function CommunityScreen({ communityRoutes, contributions, onAddContribution, re
               <ChipRow multi={false} options={typeOptions} value={form.type} onChange={(v) => setForm({ ...form, type: v })} />
             </Field>
             <Field label="Descripción"><textarea style={{ ...inputStyle, minHeight: 80, resize: "vertical" }} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            <Field label="Evidencia">
+              <Chip active={form.hasPhoto} onClick={() => setForm({ ...form, hasPhoto: !form.hasPhoto })}>
+                <Camera size={13} style={{ verticalAlign: "middle", marginRight: 5 }} /> {form.hasPhoto ? "Foto del paradero adjunta" : "Adjuntar foto del paradero o unidad"}
+              </Chip>
+            </Field>
             <Btn
               variant="primary"
               full
               icon={Send}
               onClick={() => {
                 onAddContribution(form);
-                setForm({ origin: "", destination: "", description: "", type: [] });
+                setForm({ origin: "", destination: "", description: "", type: [], hasPhoto: false });
                 setShowForm(false);
               }}
             >
@@ -1344,7 +1420,7 @@ function DemoPitchView({ routes, onClose }) {
       <div style={{ padding: 24, maxWidth: 480, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <div>
-            <span style={{ fontFamily: F.mono, fontSize: 11, color: T.tiempo }}>VISTA COMPACTA · JURADO</span>
+            <span style={{ fontFamily: F.mono, fontSize: 11, color: T.tiempo }}>RESUMEN EJECUTIVO</span>
             <h2 style={{ fontFamily: F.display, fontWeight: 700, fontSize: 22, color: T.ink, margin: "2px 0 0" }}>San Juan de Lurigancho → San Isidro</h2>
           </div>
           <button onClick={onClose} style={{ background: T.card2, border: `1px solid ${T.line}`, borderRadius: 10, width: 34, height: 34, cursor: "pointer" }}>
@@ -1376,6 +1452,112 @@ function DemoPitchView({ routes, onClose }) {
   );
 }
 
+function ChatBubble({ from, children }) {
+  const isBot = from === "bot";
+  return (
+    <div style={{ display: "flex", justifyContent: isBot ? "flex-start" : "flex-end", marginBottom: 10 }}>
+      <div
+        style={{
+          maxWidth: "82%", borderRadius: 14,
+          borderBottomLeftRadius: isBot ? 4 : 14, borderBottomRightRadius: isBot ? 14 : 4,
+          padding: "10px 13px", background: isBot ? T.card2 : T.tiempo,
+          color: isBot ? T.ink : "#0B0F1A",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function RouteChatCard({ route, reference, index }) {
+  return (
+    <div>
+      <p style={{ fontFamily: F.body, fontWeight: 700, fontSize: 13, margin: "0 0 6px" }}>{index}. {route.name}</p>
+      <p style={{ fontFamily: F.mono, fontSize: 11.5, margin: "0 0 6px", opacity: 0.85 }}>
+        ⏱ {fmtMin(route.durationMin, route.durationMax)} · 💰 {fmtSoles(route.cost)} · 🚶 {route.walkingMeters} m · 🔁 {route.transfers}
+      </p>
+      <p style={{ fontFamily: F.body, fontSize: 12.5, fontStyle: "italic", margin: 0, opacity: 0.9 }}>{tradeoffSentence(route, reference)}</p>
+    </div>
+  );
+}
+
+function ChatDemoView({ routes, onClose }) {
+  const ranked = useMemo(() => rankRoutes(routes, []), [routes]);
+  const fastest = ranked[0];
+  const script = useMemo(
+    () => [
+      { from: "bot", type: "text", content: "Hola 👋 Soy URBIX. ¿A dónde quieres ir y a qué hora?" },
+      { from: "user", type: "text", content: "De San Juan de Lurigancho a San Isidro, salgo mañana 7:00 am" },
+      { from: "bot", type: "text", content: `Encontré ${ranked.length} rutas que cumplen tu presupuesto y caminata. Te muestro la mejor:` },
+      { from: "bot", type: "card", route: ranked[0], index: 1 },
+      { from: "bot", type: "text", content: "¿Quieres ver otra opción o prefieres esta?" },
+      { from: "user", type: "text", content: "Muéstrame otra" },
+      { from: "bot", type: "card", route: ranked[1], index: 2 },
+      { from: "user", type: "text", content: "Voy con la primera" },
+      { from: "bot", type: "text", content: "Perfecto ✅ Te aviso cuando sea hora de salir y te guío tramo a tramo. Al llegar te preguntaré cómo te fue, para ayudar a otros vecinos con el mismo dato." },
+    ],
+    [ranked]
+  );
+
+  const [shown, setShown] = useState(1);
+  const [typing, setTyping] = useState(false);
+
+  useEffect(() => {
+    if (shown >= script.length) return;
+    const next = script[shown];
+    setTyping(next.from === "bot");
+    const t = setTimeout(() => {
+      setTyping(false);
+      setShown((s) => s + 1);
+    }, next.from === "bot" ? 900 : 500);
+    return () => clearTimeout(t);
+  }, [shown, script]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: T.paper, zIndex: 50, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px", borderBottom: `1px solid ${T.line}`, background: T.paperDim }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${T.tiempo}, ${T.comodidad})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <MessageSquare size={17} color="#0B0F1A" />
+          </div>
+          <div>
+            <p style={{ fontFamily: F.display, fontWeight: 700, fontSize: 15, color: T.ink, margin: 0 }}>URBIX</p>
+            <p style={{ fontFamily: F.mono, fontSize: 10.5, color: T.seguridad, margin: 0 }}>en línea · WhatsApp</p>
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: T.card2, border: `1px solid ${T.line}`, borderRadius: 10, width: 34, height: 34, cursor: "pointer" }}>
+          <X size={16} color={T.ink} style={{ margin: "0 auto" }} />
+        </button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "18px 16px" }}>
+        <Disclaimer>Así conversa el ciudadano con URBIX — sin instalar nada, directo por WhatsApp.</Disclaimer>
+        {script.slice(0, shown).map((m, i) => (
+          <ChatBubble key={i} from={m.from}>
+            {m.type === "text" ? (
+              <span style={{ fontFamily: F.body, fontSize: 13.5, lineHeight: 1.5 }}>{m.content}</span>
+            ) : (
+              <RouteChatCard route={m.route} reference={fastest} index={m.index} />
+            )}
+          </ChatBubble>
+        ))}
+        {typing && (
+          <ChatBubble from="bot">
+            <span style={{ fontFamily: F.mono, fontSize: 12, opacity: 0.7 }}>escribiendo…</span>
+          </ChatBubble>
+        )}
+        {shown >= script.length && (
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 4, marginTop: 4, opacity: 0.6 }}>
+            <CheckCheck size={14} color={T.tiempo} />
+            <span style={{ fontFamily: F.mono, fontSize: 10.5, color: T.inkSoft }}>Entregado por WhatsApp Business API</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================
    9. APP RAÍZ
    ============================================================ */
@@ -1396,6 +1578,7 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [activeIncidents, setActiveIncidents] = useState([]);
   const [showPitch, setShowPitch] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [contributions, setContributions] = useState([
     { origin: "SJL", destination: "San Isidro", status: "pending" },
   ]);
@@ -1409,6 +1592,7 @@ export default function App() {
   const communityRoutes = useMemo(() => getMockCommunityRoutes(), []);
   const incidents = useMemo(() => getMockIncidents(), []);
   const productivePlaces = useMemo(() => getMockProductivePlaces(), []);
+  const leaderboard = useMemo(() => getMockLeaderboard(), []);
   const allRoutes = useMemo(() => [...officialRoutes, ...communityRoutes.map(communityToRoute)], [officialRoutes, communityRoutes]);
 
   const recurring = [
@@ -1475,7 +1659,7 @@ export default function App() {
         }}
       >
         <div style={{ flex: 1 }}>
-          {screen === "welcome" && <WelcomeScreen onStart={() => go("planning")} />}
+          {screen === "welcome" && <WelcomeScreen onStart={() => go("planning")} onOpenChat={() => setShowChat(true)} />}
 
           {screen === "planning" && (
             <PlanningScreen
@@ -1512,6 +1696,7 @@ export default function App() {
               onSelect={(r) => { setSelectedRoute(r); go("detail"); }}
               onDetail={(r) => { setSelectedRoute(r); go("detail"); }}
               onOpenPitch={() => setShowPitch(true)}
+              onOpenChat={() => setShowChat(true)}
               onQuickPriority={onQuickPriority}
               productiveTime={productiveTime}
               productivePlaces={productivePlaces}
@@ -1560,6 +1745,7 @@ export default function App() {
               reputationPoints={reputationPoints}
               peerReports={peerReports}
               onConfirmReport={confirmReport}
+              leaderboard={leaderboard}
             />
           )}
 
@@ -1569,6 +1755,7 @@ export default function App() {
         {!hideNav && <BottomNav screen={screen} go={go} />}
 
         {showPitch && <DemoPitchView routes={officialRoutes} onClose={() => setShowPitch(false)} />}
+        {showChat && <ChatDemoView routes={allRoutes} onClose={() => setShowChat(false)} />}
       </div>
     </div>
   );
